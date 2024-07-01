@@ -62,6 +62,8 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     prim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
     # Origin 2
     prim_utils.create_prim("/World/Origin2", "Xform", translation=origins[1])
+    # # Origin 3
+    # prim_utils.create_prim("/World/Origin3", "Xform", translation=origins[2])
 
     # Articulation
     cartpole_cfg = CARTPOLE_CFG.copy()

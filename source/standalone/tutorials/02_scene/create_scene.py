@@ -44,7 +44,7 @@ from omni.isaac.lab.utils import configclass
 ##
 # Pre-defined configs
 ##
-from omni.isaac.lab_assets import CARTPOLE_CFG  # isort:skip
+from omni.isaac.lab_assets import CARTPOLE_CFG, FRANKA_PANDA_CFG, STRETCH_CFG# isort:skip
 
 
 @configclass

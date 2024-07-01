@@ -1,0 +1,6 @@
+arm_retracted_offset: 0.0034869479422517673
+pan_angle_offset: 0.04745309048053354
+pan_looked_left_offset: -0.0025436675638209217
+tilt_angle_backlash_transition: -0.4
+tilt_angle_offset: 0.02623003320140353
+tilt_looking_up_offset: -0.0077188192248770155

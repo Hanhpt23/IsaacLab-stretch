@@ -197,6 +197,14 @@ class FrankaCabinetEnv(DirectRLEnv):
 
         self.dt = self.cfg.sim.dt * self.cfg.decimation
 
+        # Joint names:  ['panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 
+        #                'panda_joint7', 'panda_finger_joint1', 'panda_finger_joint2']
+
+        self.target_base_names = [
+            "panda_joint6",
+        ]
+        self.target_base_index = [self._robot.data.joint_names.index(name) for name in self.target_base_names]
+
         # create auxiliary variables for computing applied action, observations and rewards
         self.robot_dof_lower_limits = self._robot.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
         self.robot_dof_upper_limits = self._robot.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
@@ -287,6 +295,8 @@ class FrankaCabinetEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-1.0, 1.0)
         targets = self.robot_dof_targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        # self.robot_dof_targets[:, self.target_base_index] = 0
+        # print('Joint names: ', self._robot.data.joint_names)
 
     def _apply_action(self):
         self._robot.set_joint_position_target(self.robot_dof_targets)
@@ -296,7 +306,10 @@ class FrankaCabinetEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
         truncated = self.episode_length_buf >= self.max_episode_length - 1
+        print('Termination and truncation: ',terminated, truncated)
+        
         return terminated, truncated
+    
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps

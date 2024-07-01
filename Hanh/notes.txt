@@ -1,0 +1,4 @@
+Applying commands to the articulation involves two steps:
+1. Setting the joint targets: This sets the desired joint position, velocity, or effort targets for the articulation.
+
+2. Writing the data to the simulation: Based on the articulation’s configuration, this step handles any actuation conversions and writes the converted values to the PhysX buffer.
