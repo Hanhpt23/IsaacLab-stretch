@@ -62,7 +62,7 @@ def main():
 
             actions = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
 
-            actions[:, 1:3] =  50.0#torch.randint(30, 50, (1,))
+            actions[:, 1:3] =  5.0#torch.randint(30, 50, (1,))
             actions[:, 3] = 0.5
 
             # apply actions
