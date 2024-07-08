@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
-
+import random
 import torch
 
 from omni.isaac.core.utils.stage import get_current_stage
@@ -201,7 +201,7 @@ class FrankaCabinetEnv(DirectRLEnv):
         #                'panda_joint7', 'panda_finger_joint1', 'panda_finger_joint2']
 
         self.target_base_names = [
-            "panda_joint6",
+            "panda_joint4",
         ]
         self.target_base_index = [self._robot.data.joint_names.index(name) for name in self.target_base_names]
 
@@ -292,11 +292,39 @@ class FrankaCabinetEnv(DirectRLEnv):
     # pre-physics step calls
 
     def _pre_physics_step(self, actions: torch.Tensor):
+        self.current_step +=1 # from 0 to 499
         self.actions = actions.clone().clamp(-1.0, 1.0)
         targets = self.robot_dof_targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
-        # self.robot_dof_targets[:, self.target_base_index] = 0
+        self.robot_dof_targets[:, self.target_base_index] = 0
         # print('Joint names: ', self._robot.data.joint_names)
+
+        # Determine the mode of joint operation
+        # print('Length buffer and episode: ',self.episode_length_buf, self._sim_step_counter, self.current_step, self.mode)
+        print(self.current_step, self.mode)
+        if self.mode == "not_working":
+            # Set joint targets to zero (not working)
+            self.robot_dof_targets[:, self.target_base_index] = 0
+        elif self.mode == "half_time":
+            # Half of the time, set joint targets to zero
+            if self.current_step >= 255:
+                self.robot_dof_targets[:, self.target_base_index] = 0
+        elif self.mode == "random":
+            # Randomly choose to set joint targets to zero or not
+            self.random_step1 = torch.randint(0, 100, (1,)).item() 
+            self.random_step2 = torch.randint(200, 300, (1,)).item() 
+            self.random_step3 = torch.randint(400, 450, (1,)).item() 
+
+            # Set joint targets to zero from random_step1 to random_step2
+            if self.random_step1 <= self.current_step <= self.random_step2:
+                self.robot_dof_targets[:, self.target_base_index] = 0
+            # Set joint targets to zero at random_step3
+            elif self.current_step >= self.random_step3:
+                self.robot_dof_targets[:, self.target_base_index] = 0
+            pass
+
+        # self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+
 
     def _apply_action(self):
         self._robot.set_joint_position_target(self.robot_dof_targets)
@@ -306,7 +334,8 @@ class FrankaCabinetEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
         truncated = self.episode_length_buf >= self.max_episode_length - 1
-        print('Termination and truncation: ',terminated, truncated)
+        # print('Termination and truncation: ',terminated, truncated)
+        # print('Length buffer and episode: ',self.episode_length_buf, self._sim_step_counter, self.current_step, self.mode)
         
         return terminated, truncated
     
@@ -343,6 +372,10 @@ class FrankaCabinetEnv(DirectRLEnv):
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
+
+        self.current_step = 0
+        self.mode = self._select_joint_mode()
+        
         # robot state
         joint_pos = self._robot.data.default_joint_pos[env_ids] + sample_uniform(
             -0.125,
@@ -351,6 +384,7 @@ class FrankaCabinetEnv(DirectRLEnv):
             self.device,
         )
         joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+
         joint_vel = torch.zeros_like(joint_pos)
         self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
@@ -533,3 +567,12 @@ class FrankaCabinetEnv(DirectRLEnv):
         )
 
         return global_franka_rot, global_franka_pos, global_drawer_rot, global_drawer_pos
+    
+    def _select_joint_mode(self):
+        # Logic to select the mode (not working, half-time, random)
+        # You can replace this with your own logic to choose the mode
+        # For example, you can use a random choice or a predefined sequence
+        # based on episode number or other conditions.
+        # Here's a simple random choice:
+        modes = ["not_working", "half_time", "random"]
+        return random.choice(modes)

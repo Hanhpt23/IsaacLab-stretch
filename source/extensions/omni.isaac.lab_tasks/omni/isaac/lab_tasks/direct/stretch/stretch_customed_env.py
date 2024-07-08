@@ -22,7 +22,6 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import sample_uniform
 from omni.isaac.lab_assets import STRETCH_CFG
-from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg
 from omni.isaac.lab.envs import DirectRLEnv, DirectRLEnvCfg
 
 
@@ -135,7 +134,7 @@ class StretchReachCustomEnv(DirectRLEnv):
     #   |-- _get_observations()
 
     cfg: StretchReachCustomEnvCfg
-    cfg1: DirectRLEnvCfg
+
 
     def __init__(self, cfg: StretchReachCustomEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
