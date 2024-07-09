@@ -296,7 +296,7 @@ class FrankaCabinetEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-1.0, 1.0)
         targets = self.robot_dof_targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
-        self.robot_dof_targets[:, self.target_base_index] = 0
+        # self.robot_dof_targets[:, self.target_base_index] = 0
         # print('Joint names: ', self._robot.data.joint_names)
 
         # Determine the mode of joint operation
@@ -321,6 +321,9 @@ class FrankaCabinetEnv(DirectRLEnv):
             # Set joint targets to zero at random_step3
             elif self.current_step >= self.random_step3:
                 self.robot_dof_targets[:, self.target_base_index] = 0
+            pass
+        
+        elif self.mode == "working":
             pass
 
         # self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
@@ -375,7 +378,7 @@ class FrankaCabinetEnv(DirectRLEnv):
 
         self.current_step = 0
         self.mode = self._select_joint_mode()
-        
+
         # robot state
         joint_pos = self._robot.data.default_joint_pos[env_ids] + sample_uniform(
             -0.125,
@@ -574,5 +577,5 @@ class FrankaCabinetEnv(DirectRLEnv):
         # For example, you can use a random choice or a predefined sequence
         # based on episode number or other conditions.
         # Here's a simple random choice:
-        modes = ["not_working", "half_time", "random"]
+        modes = ["working", "not_working", "half_time", "random"]
         return random.choice(modes)
