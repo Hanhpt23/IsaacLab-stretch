@@ -93,7 +93,7 @@ def main():
             ],
         )
         models["value"] = models["policy"]
-
+    # print(models["policy"], models["value"])
     # configure and instantiate PPO agent
     # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
     agent_cfg = PPO_DEFAULT_CONFIG.copy()
@@ -142,6 +142,7 @@ def main():
             # env stepping
             obs, _, _, _, _ = env.step(actions)
 
+            # print(env._calculate_success_rate)
     # close the simulator
     env.close()
 

@@ -157,7 +157,7 @@ def main():
             ],
         )
         models["value"] = models["policy"]
-
+    
     # instantiate a RandomMemory as rollout buffer (any memory can be used for this)
     # https://skrl.readthedocs.io/en/latest/api/memories/random.html
     memory_size = experiment_cfg["agent"]["rollouts"]  # memory_size is the agent's number of rollouts

@@ -6,6 +6,7 @@
 from __future__ import annotations
 import random
 import torch
+import time
 
 from omni.isaac.core.utils.stage import get_current_stage
 from omni.isaac.core.utils.torch.transformations import tf_combine, tf_inverse, tf_vector
@@ -22,6 +23,7 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import sample_uniform
 
+from typing import Tuple, Dict
 
 @configclass
 class FrankaCabinetEnvCfg(DirectRLEnvCfg):
@@ -179,6 +181,16 @@ class FrankaCabinetEnv(DirectRLEnv):
     def __init__(self, cfg: FrankaCabinetEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
+        # For calculating the success rate
+        self.success_log = torch.zeros(self.num_envs, dtype=torch.int, device=self.device)
+        self.count = 0
+        self.mean_sucess_rate = 0
+
+        # For calculating the time to complete the task
+        
+        self.completion_times = 0
+        self.task_time = 0
+
         def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: torch.device):
             """Compute pose in env-local coordinates"""
             world_transform = xformable.ComputeLocalToWorldTransform(0)
@@ -201,7 +213,7 @@ class FrankaCabinetEnv(DirectRLEnv):
         #                'panda_joint7', 'panda_finger_joint1', 'panda_finger_joint2']
 
         self.target_base_names = [
-            "panda_joint4",
+            "panda_joint3",
         ]
         self.target_base_index = [self._robot.data.joint_names.index(name) for name in self.target_base_names]
 
@@ -297,18 +309,27 @@ class FrankaCabinetEnv(DirectRLEnv):
         targets = self.robot_dof_targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
         # self.robot_dof_targets[:, self.target_base_index] = 0
-        # print('Joint names: ', self._robot.data.joint_names)
+        # print('Robot defaul position: ', self._robot.data.default_joint_pos)
+        # print('Cabinet joints position: ', self._cabinet.data.joint_pos)
 
         # Determine the mode of joint operation
         # print('Length buffer and episode: ',self.episode_length_buf, self._sim_step_counter, self.current_step, self.mode)
-        print(self.current_step, self.mode)
+        # print('Current step and mode: ',self.current_step, self.mode)
         if self.mode == "not_working":
             # Set joint targets to zero (not working)
             self.robot_dof_targets[:, self.target_base_index] = 0
         elif self.mode == "half_time":
-            # Half of the time, set joint targets to zero
-            if self.current_step >= 255:
-                self.robot_dof_targets[:, self.target_base_index] = 0
+            which_hafl = [1]
+            half = random.choice(which_hafl)
+            if half == 0:
+            # First half of the time, set joint targets to zero
+                if self.current_step < 255:
+                    self.robot_dof_targets[:, self.target_base_index] = 0
+            else:
+            # Second half of the time, set joint targets to zero
+                if self.current_step >= 255:
+                    self.robot_dof_targets[:, self.target_base_index] = 0
+
         elif self.mode == "random":
             # Randomly choose to set joint targets to zero or not
             self.random_step1 = torch.randint(0, 100, (1,)).item() 
@@ -322,9 +343,9 @@ class FrankaCabinetEnv(DirectRLEnv):
             elif self.current_step >= self.random_step3:
                 self.robot_dof_targets[:, self.target_base_index] = 0
             pass
-        
-        elif self.mode == "working":
-            pass
+        else: pass
+
+
 
         # self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
 
@@ -332,14 +353,21 @@ class FrankaCabinetEnv(DirectRLEnv):
     def _apply_action(self):
         self._robot.set_joint_position_target(self.robot_dof_targets)
 
+        # print(self._robot.data.body_pos_w)
+
     # post-physics step calls
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
+        terminated = self._cabinet.data.joint_pos[:, 3] > 0.37 # 0.39 original
         truncated = self.episode_length_buf >= self.max_episode_length - 1
         # print('Termination and truncation: ',terminated, truncated)
         # print('Length buffer and episode: ',self.episode_length_buf, self._sim_step_counter, self.current_step, self.mode)
-        
+
+        self.success_log += terminated.int()
+        if terminated or truncated:
+            self.end_time = time.time() 
+            self.task_time = self.end_time - self.start_time
+
         return terminated, truncated
     
 
@@ -373,11 +401,17 @@ class FrankaCabinetEnv(DirectRLEnv):
             self.cfg.finger_close_reward_scale,
         )
 
+        # return self._compute_rewards(self.robot_grasp_pos, self.drawer_grasp_pos,
+        #             self._cabinet.data.joint_pos, self._cabinet.data.joint_vel)
+
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
 
         self.current_step = 0
-        self.mode = self._select_joint_mode()
+        # self.mode = self._select_joint_mode() # for training
+        self.mode = "none" # for testing only: random, not_working, half_time, working
+        self.count += 1
+        self.start_time = time.time()
 
         # robot state
         joint_pos = self._robot.data.default_joint_pos[env_ids] + sample_uniform(
@@ -399,6 +433,9 @@ class FrankaCabinetEnv(DirectRLEnv):
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
         self._compute_intermediate_values(env_ids)
 
+        self.calculate_success_rate()
+        
+
     def _get_observations(self) -> dict:
         dof_pos_scaled = (
             2.0
@@ -418,6 +455,12 @@ class FrankaCabinetEnv(DirectRLEnv):
             ),
             dim=-1,
         )
+        # print('_get_observations', dof_pos_scaled.shape, '\n',
+        #       self._robot.data.joint_vel.shape, '\n',
+        #       to_target.shape, '\n',
+        #       self._cabinet.data.joint_pos[:, 3].shape,'\n',
+        #       self._cabinet.data.joint_vel[:, 3].shape
+        #       )
         return {"policy": torch.clamp(obs, -5.0, 5.0)}
 
     # auxiliary methods
@@ -431,6 +474,7 @@ class FrankaCabinetEnv(DirectRLEnv):
         drawer_pos = self._cabinet.data.body_pos_w[env_ids, self.drawer_link_idx]
         drawer_rot = self._cabinet.data.body_quat_w[env_ids, self.drawer_link_idx]
         (
+            # global_franka_rot, global_franka_pos, global_drawer_rot, global_drawer_pos
             self.robot_grasp_rot[env_ids],
             self.robot_grasp_pos[env_ids],
             self.drawer_grasp_rot[env_ids],
@@ -445,6 +489,8 @@ class FrankaCabinetEnv(DirectRLEnv):
             self.drawer_local_grasp_rot[env_ids],
             self.drawer_local_grasp_pos[env_ids],
         )
+        # print('Robot root and positions: ',self.robot_grasp_rot, self.robot_grasp_pos)
+        # print('Draw root and positions: ',self.drawer_grasp_rot, self.drawer_grasp_pos, '\n')
 
     def _compute_rewards(
         self,
@@ -489,7 +535,9 @@ class FrankaCabinetEnv(DirectRLEnv):
         )  # alignment of up axis for gripper
         # reward for matching the orientation of the hand to the drawer (fingers wrapped)
         rot_reward = 0.5 * (torch.sign(dot1) * dot1**2 + torch.sign(dot2) * dot2**2)
-
+        # print('dot1: ', dot1)
+        # print('dot2: ', dot2)
+        # print('rot_reward: ', rot_reward)
         # bonus if left finger is above the drawer handle and right below
         around_handle_reward = torch.zeros_like(rot_reward)
         around_handle_reward = torch.where(
@@ -500,18 +548,18 @@ class FrankaCabinetEnv(DirectRLEnv):
             around_handle_reward,
         )
         # reward for distance of each finger from the drawer
-        finger_dist_reward = torch.zeros_like(rot_reward)
-        lfinger_dist = torch.abs(franka_lfinger_pos[:, 2] - drawer_grasp_pos[:, 2])
-        rfinger_dist = torch.abs(franka_rfinger_pos[:, 2] - drawer_grasp_pos[:, 2])
-        finger_dist_reward = torch.where(
-            franka_lfinger_pos[:, 2] > drawer_grasp_pos[:, 2],
-            torch.where(
-                franka_rfinger_pos[:, 2] < drawer_grasp_pos[:, 2],
-                (0.04 - lfinger_dist) + (0.04 - rfinger_dist),
-                finger_dist_reward,
-            ),
-            finger_dist_reward,
-        )
+        # finger_dist_reward = torch.zeros_like(rot_reward)
+        # lfinger_dist = torch.abs(franka_lfinger_pos[:, 2] - drawer_grasp_pos[:, 2])
+        # rfinger_dist = torch.abs(franka_rfinger_pos[:, 2] - drawer_grasp_pos[:, 2])
+        # finger_dist_reward = torch.where(
+        #     franka_lfinger_pos[:, 2] > drawer_grasp_pos[:, 2],
+        #     torch.where(
+        #         franka_rfinger_pos[:, 2] < drawer_grasp_pos[:, 2],
+        #         (0.04 - lfinger_dist) + (0.04 - rfinger_dist),
+        #         finger_dist_reward,
+        #     ),
+        #     finger_dist_reward,
+        # )
 
         finger_close_reward = torch.zeros_like(rot_reward)
         finger_close_reward = torch.where(
@@ -519,7 +567,7 @@ class FrankaCabinetEnv(DirectRLEnv):
         )
 
         # regularization on the actions (summed for each environment)
-        action_penalty = torch.sum(actions**2, dim=-1)
+        # action_penalty = torch.sum(actions**2, dim=-1)
 
         # how far the cabinet has been opened out
         open_reward = cabinet_dof_pos[:, 3] * around_handle_reward + cabinet_dof_pos[:, 3]  # drawer_top_joint
@@ -529,9 +577,9 @@ class FrankaCabinetEnv(DirectRLEnv):
             + rot_reward_scale * rot_reward
             + around_handle_reward_scale * around_handle_reward
             + open_reward_scale * open_reward
-            + finger_dist_reward_scale * finger_dist_reward
-            - action_penalty_scale * action_penalty
-            + finger_close_reward * finger_close_reward_scale
+            # + finger_dist_reward_scale * finger_dist_reward
+            # - action_penalty_scale * action_penalty
+            # + finger_close_reward * finger_close_reward_scale
         )
 
         self.extras["log"] = {
@@ -539,9 +587,10 @@ class FrankaCabinetEnv(DirectRLEnv):
             "rot_reward": (rot_reward_scale * rot_reward).mean(),
             "around_handle_reward": (around_handle_reward_scale * around_handle_reward).mean(),
             "open_reward": (open_reward_scale * open_reward).mean(),
-            "finger_dist_reward": (finger_dist_reward_scale * finger_dist_reward).mean(),
-            "action_penalty": (action_penalty_scale * action_penalty).mean(),
-            "finger_close_reward": (finger_close_reward * finger_close_reward_scale).mean(),
+            "total_reward": rewards.mean()
+            # "finger_dist_reward": (finger_dist_reward_scale * finger_dist_reward).mean(),
+            # "action_penalty": (action_penalty_scale * action_penalty).mean(),
+            # "finger_close_reward": (finger_close_reward * finger_close_reward_scale).mean(),
         }
 
         # bonus for opening drawer properly
@@ -573,9 +622,22 @@ class FrankaCabinetEnv(DirectRLEnv):
     
     def _select_joint_mode(self):
         # Logic to select the mode (not working, half-time, random)
-        # You can replace this with your own logic to choose the mode
-        # For example, you can use a random choice or a predefined sequence
-        # based on episode number or other conditions.
-        # Here's a simple random choice:
+        # modes = ["not_working", "half_time", "random"]
         modes = ["working", "not_working", "half_time", "random"]
         return random.choice(modes)
+    
+    
+    def calculate_success_rate(self):
+        success_rate = self.success_log.float().mean().item() * 100
+        self.mean_sucess_rate += success_rate
+        self.completion_times += self.task_time
+        print('Task time: ', self.task_time)
+        # print(f"Success Rate: {success_rate}%")
+        if self.count % 5 == 0:
+            print('Mode: ', self.mode)
+            print('Count: ', self.count, f'Success_rate: {self.mean_sucess_rate/self.count}%', f'Average time: {self.completion_times/self.count} ')
+            # print('Count: ', self.count, f'Success_rate: {self.mean_sucess_rate/self.count}%')
+
+        # Reset the success log for the next episode
+        self.success_log.zero_()
+        return success_rate
